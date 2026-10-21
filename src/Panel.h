@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "AudioPassthrough.h"
 #include "Display.h"
 
 #include <chrono>
@@ -47,6 +48,7 @@ private:
     void DrawPreview(float width, float height);
     void DrawSources(float width, float height);
     void DrawPicture(float width);
+    void DrawAudio(float width);
     void DrawOptions(float width);
     void DrawHowTo(float width, float height);
 
@@ -65,7 +67,9 @@ private:
     ImFont* m_fontIcon = nullptr;
     ImFont* m_fontHeroIcon = nullptr;
 
-    int m_sourceTab = 0; // 0 = displays, 1 = windows
+    int m_sourceTab = 0;   // 0 = displays, 1 = windows
+    int m_settingsTab = 0; // 0 = picture, 1 = audio, 2 = options
+    std::vector<AudioPassthrough::Device> m_audioDevices;
     std::vector<DisplayInfo> m_displays;
     std::vector<WindowEntry> m_windows;
     std::chrono::steady_clock::time_point m_lastSourceRefresh{};

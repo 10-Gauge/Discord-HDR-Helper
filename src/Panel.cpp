@@ -22,12 +22,14 @@ using namespace std::chrono;
 #define ICON_SETTINGS   "\xEE\x9C\x93"
 #define ICON_INFO       "\xEE\xA5\x86"
 #define ICON_VIDEO      "\xEE\x9C\x94"
+#define ICON_VOLUME     "\xEE\x9D\xA7"
+#define ICON_WARNING    "\xEE\x9E\xBA"
 
 namespace
 {
     constexpr wchar_t kClass[] = L"DiscordHDRHelperPanel";
     constexpr wchar_t kTitle[] = L"Discord HDR Helper";
-    constexpr char kVersion[] = "v1.0.0";
+    constexpr char kVersion[] = "v" APP_VERSION;
     constexpr wchar_t kRepoUrl[] = L"https://github.com/10-Gauge/Discord-HDR-Helper";
 
     // Logical (96 DPI) size of the panel.
@@ -586,6 +588,7 @@ void Panel::RefreshSources(bool force)
     m_lastSourceRefresh = now;
 
     m_displays = EnumerateDisplays();
+    m_audioDevices = AudioPassthrough::EnumerateOutputDevices();
 
     m_windows.clear();
     EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
@@ -654,8 +657,15 @@ bool Panel::Render()
     ImGui::BeginChild("##right", ImVec2(rightW, columnsH), ImGuiChildFlags_None);
     ImGui::PopStyleColor();
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(S(10), S(8)));
-    DrawPicture(rightW);
-    DrawOptions(rightW);
+    const char* tabs[] = { ICON_BRIGHTNESS "  Picture", ICON_VOLUME "  Audio", ICON_SETTINGS "  Options" };
+    Segmented("##settingsTabs", tabs, 3, &m_settingsTab, rightW);
+    ImGui::Dummy(ImVec2(0, S(4)));
+    if (m_settingsTab == 0)
+        DrawPicture(rightW);
+    else if (m_settingsTab == 1)
+        DrawAudio(rightW);
+    else
+        DrawOptions(rightW);
     ImGui::PopStyleVar();
     ImGui::EndChild();
 
@@ -953,6 +963,124 @@ void Panel::DrawPicture(float width)
 
     EndCard();
     ImGui::Dummy(ImVec2(0, S(4)));
+    if (changed)
+        m_app.ApplySettings();
+}
+
+void Panel::DrawAudio(float width)
+{
+    BeginCard("##audio", width);
+    Settings& s = m_app.settings;
+    bool changed = false;
+
+    SectionTitle(m_fontSemibold, ICON_VOLUME, "Audio");
+    ImGui::Dummy(ImVec2(0, S(2)));
+    changed |= Toggle("Send PC audio with the stream", &s.audioEnabled);
+
+    ImGui::BeginDisabled(!s.audioEnabled);
+
+    // Output device the audio is replayed into.
+    ImGui::TextUnformatted("Play through");
+    const AudioPassthrough::Device* selected = nullptr;
+    for (const auto& d : m_audioDevices)
+        if (d.id == s.audioDevice)
+            selected = &d;
+    constexpr char kAutomatic[] = "Automatic (silent, no extra device)";
+    std::string preview = selected ? Utf8(selected->name) : kAutomatic;
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, Vec(0x1E1F22));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Vec(kHover));
+    if (ImGui::BeginCombo("##device", preview.c_str()))
+    {
+        if (ImGui::Selectable(kAutomatic, s.audioDevice.empty()) && !s.audioDevice.empty())
+        {
+            s.audioDevice.clear();
+            changed = true;
+        }
+        ImGui::Separator();
+        for (const auto& d : m_audioDevices)
+        {
+            std::string label = Utf8(d.name) + (d.isDefault ? "  (default)" : "");
+            if (ImGui::Selectable(label.c_str(), d.id == s.audioDevice))
+            {
+                s.audioDevice = d.id;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::PopStyleColor(2);
+
+    ImGui::PushFont(m_fontSmall);
+    if (selected && selected->isDefault)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, Vec(0xF0B232));
+        ImGui::TextWrapped(ICON_WARNING "  This is the device you listen on, so you'll hear the audio twice. "
+                           "Pick one you don't use, like your monitor's speakers.");
+        ImGui::PopStyleColor();
+    }
+    else if (!selected)
+    {
+        MutedText("Replays the audio on your speakers at zero volume, so you don't hear it twice. "
+                  "If viewers get no sound, pick a device you don't listen to instead.");
+    }
+    else
+    {
+        MutedText("Discord picks the sound up from this device. You won't hear it unless you listen on it.");
+    }
+    ImGui::PopFont();
+
+    ImGui::Dummy(ImVec2(0, S(2)));
+    ImGui::TextUnformatted("Audio from");
+    const char* modes[] = { "Captured app", "All apps" };
+    if (Segmented("##audioMode", modes, 2, &s.audioMode, ImGui::GetContentRegionAvail().x))
+        changed = true;
+    ImGui::PushFont(m_fontSmall);
+    MutedText(s.audioMode == 0 ? "Only the app you're capturing. When capturing a display, all apps are used."
+                               : "Every app except Discord, so viewers don't hear your voice chat.");
+    ImGui::PopFont();
+    ImGui::EndDisabled();
+
+    // Live status and level meter.
+    ImGui::Dummy(ImVec2(0, S(2)));
+    auto status = m_app.AudioStatus();
+    std::string line;
+    ImU32 color = Rgb(kMuted);
+    if (!s.audioEnabled)
+        line = "Off";
+    else if (!status.error.empty())
+    {
+        line = Utf8(status.error);
+        color = Rgb(0xF0B232);
+    }
+    else if (!m_app.Capturing())
+        line = "Starts when you capture a display or window.";
+    else if (status.sources.empty())
+        line = "Waiting for an app to play sound\xE2\x80\xA6";
+    else
+    {
+        line = "Sending: ";
+        for (size_t i = 0; i < status.sources.size(); ++i)
+            line += (i ? ", " : "") + Utf8(status.sources[i]);
+        color = Rgb(kText);
+    }
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float w = ImGui::GetContentRegionAvail().x, h = S(6);
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), Rgb(0x111214), h * 0.5f);
+    float level = status.running ? std::sqrt(std::clamp(status.level, 0.f, 1.f)) : 0.f;
+    if (level > 0.01f)
+        dl->AddRectFilled(p, ImVec2(p.x + w * level, p.y + h), level > 0.95f ? Rgb(0xF0B232) : Rgb(kGreen), h * 0.5f);
+    ImGui::Dummy(ImVec2(w, h));
+    ImGui::PushFont(m_fontSmall);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color));
+    ImGui::TextWrapped("%s", line.c_str());
+    ImGui::PopStyleColor();
+    MutedText("In Discord, make sure Sound is on in the stream settings.");
+    ImGui::PopFont();
+
+    EndCard();
     if (changed)
         m_app.ApplySettings();
 }

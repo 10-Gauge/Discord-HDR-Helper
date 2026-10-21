@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "AudioPassthrough.h"
 #include "Capture.h"
 #include "Display.h"
 #include "Gpu.h"
@@ -40,6 +41,7 @@ public:
     const Gpu& GetGpu() const { return m_gpu; }
     const Tonemapper& GetTonemapper() const { return m_tonemapper; }
     OutputWindow& Output() { return m_output; }
+    AudioPassthrough::Status AudioStatus() const { return m_audio.GetStatus(); }
 
     void CaptureMonitor(const DisplayInfo& display);
     void CaptureWindow(HWND window, const std::wstring& name);
@@ -55,12 +57,14 @@ private:
     void StartDemo();
     void ProcessFrame();
     TonemapParams Params() const;
+    void UpdateAudio();
 
     Gpu m_gpu;
     Tonemapper m_tonemapper;
     OutputWindow m_output;
     std::unique_ptr<Panel> m_panel;
     std::unique_ptr<Capture> m_capture;
+    AudioPassthrough m_audio;
 
     HANDLE m_frameEvent = nullptr;
     HMONITOR m_sourceMonitor = nullptr;

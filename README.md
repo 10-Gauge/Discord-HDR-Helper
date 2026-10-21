@@ -30,6 +30,9 @@ your screen the way it's meant to look.
   no tuning.
 - **Live preview.** The control panel shows exactly what Discord will send.
 - **Displays or single windows.** Capture a whole monitor or just one game or app.
+- **Brings your game audio along.** Discord only sends sound from the app that
+  owns a shared window, so the helper replays your game's audio (or every app's,
+  minus Discord) from its own window, silently, without a virtual cable.
 - **Stays out of the way.** The output window can sit behind everything else
   (Discord still captures it), and the control panel hides itself from screen
   capture so it never appears in your stream.
@@ -51,6 +54,17 @@ your screen the way it's meant to look.
 3. In Discord, start a screen share, open the **Applications** tab and choose
    **Discord HDR Helper Output**.
 4. If the stream looks too bright or too dark, adjust **Brightness**.
+
+### Audio
+
+Discord sends sound only from the app whose window you share. Discord HDR Helper
+records the audio of the app you capture (or all apps except Discord when you
+capture a display) and replays it, so Discord picks it up from the output window.
+Make sure **Sound** is on in Discord's stream settings.
+
+By default the replay runs on your normal speakers at zero volume, so you don't
+hear anything twice. If your viewers get no sound, open the **Audio** tab and
+pick an output device you don't listen to, such as your monitor's speakers.
 
 ### Tips
 

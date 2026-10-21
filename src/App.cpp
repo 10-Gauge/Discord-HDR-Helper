@@ -65,6 +65,16 @@ void App::ApplySettings()
     m_panel->SetExcludedFromCapture(settings.hidePanelFromCapture);
     m_tonemapper.Reprocess(Params());
     m_output.Present(m_tonemapper);
+    UpdateAudio();
+}
+
+// Audio follows the video source: the shared window's app, or every app for a display.
+void App::UpdateAudio()
+{
+    DWORD target = 0;
+    if (settings.audioMode == 0 && m_sourceWindow)
+        GetWindowThreadProcessId(m_sourceWindow, &target);
+    m_audio.Configure(settings.audioEnabled && m_capture != nullptr, settings.audioDevice, target);
 }
 
 void App::StartCapture(winrt::Windows::Graphics::Capture::GraphicsCaptureItem const& item)
@@ -85,6 +95,7 @@ void App::StartCapture(winrt::Windows::Graphics::Capture::GraphicsCaptureItem co
     auto size = item.Size();
     m_output.SetVisible(true);
     m_output.SizeToSource(UINT(size.Width), UINT(size.Height));
+    UpdateAudio();
 }
 
 void App::CaptureMonitor(const DisplayInfo& display)
@@ -136,6 +147,7 @@ void App::StopCapture(const std::wstring& error)
     m_tonemapper.Clear();
     RefreshDisplayInfo();
     m_output.Present(m_tonemapper);
+    UpdateAudio();
 }
 
 void App::OnSourceClosed()
