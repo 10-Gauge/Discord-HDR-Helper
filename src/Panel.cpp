@@ -1159,11 +1159,10 @@ void Panel::DrawOptions(float width)
     changed |= Toggle("Hide this panel from the stream", &s.hidePanelFromCapture);
 
     ImGui::Dummy(ImVec2(0, S(2)));
-    bool canFit = m_app.GetTonemapper().HasOutput();
-    ImGui::BeginDisabled(!canFit);
-    if (ImGui::Button("Resize output to source", ImVec2(-FLT_MIN, 0)))
-        m_app.Output().SizeToSource(m_app.GetTonemapper().Width(), m_app.GetTonemapper().Height());
-    ImGui::EndDisabled();
+    ImGui::PushFont(m_fontSmall);
+    MutedText("The output window always matches the source's resolution, so Discord gets every pixel. "
+              "It can be larger than your screen; it stays out of the way behind other windows.");
+    ImGui::PopFont();
 
     EndCard();
     ImGui::Dummy(ImVec2(0, S(4)));

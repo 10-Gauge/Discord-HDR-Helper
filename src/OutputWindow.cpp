@@ -70,16 +70,15 @@ void OutputWindow::SizeToSource(UINT width, UINT height)
 {
     if (width == 0 || height == 0)
         return;
-    // Fit to the whole monitor, not just the work area, so a full-screen source
-    // (e.g. 3840x2160 on a 4K display) gets a window of exactly its size. The
-    // window normally sits behind everything, so covering the taskbar is fine.
+    m_sizedWidth = width;
+    m_sizedHeight = height;
+    int w = int(width), h = int(height);
+
+    // Keep the window on its monitor where it fits; anchor it to the monitor's
+    // top-left corner where it doesn't.
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
     const RECT& area = mi.rcMonitor;
-    double maxW = area.right - area.left, maxH = area.bottom - area.top;
-    double scale = std::min({ 1.0, maxW / width, maxH / height });
-    int w = std::max(1, int(width * scale)), h = std::max(1, int(height * scale));
-
     RECT rc{};
     GetWindowRect(m_hwnd, &rc);
     int x = std::clamp<int>(rc.left, area.left, std::max<int>(area.left, area.right - w));
@@ -126,6 +125,8 @@ void OutputWindow::Present(const Tonemapper& tonemapper)
         return;
     m_sourceWidth = tonemapper.HasOutput() ? tonemapper.Width() : 0;
     m_sourceHeight = tonemapper.HasOutput() ? tonemapper.Height() : 0;
+    if (m_sourceWidth && (m_sourceWidth != m_sizedWidth || m_sourceHeight != m_sizedHeight))
+        SizeToSource(m_sourceWidth, m_sourceHeight); // The source was resized
     Resize();
     auto* ctx = m_gpu->context.get();
     const float black[4] = { 0, 0, 0, 1 };
@@ -216,22 +217,17 @@ LRESULT OutputWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
     {
     case WM_NCHITTEST:
     {
-        // Borderless: drag anywhere to move, edges to resize.
-        POINT pt{ GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-        ScreenToClient(m_hwnd, &pt);
-        RECT rc{};
-        GetClientRect(m_hwnd, &rc);
-        const int b = MulDiv(8, GetDpiForWindow(m_hwnd), 96);
-        bool l = pt.x < b, r = pt.x >= rc.right - b, t = pt.y < b, btm = pt.y >= rc.bottom - b;
-        if (t && l) return HTTOPLEFT;
-        if (t && r) return HTTOPRIGHT;
-        if (btm && l) return HTBOTTOMLEFT;
-        if (btm && r) return HTBOTTOMRIGHT;
-        if (l) return HTLEFT;
-        if (r) return HTRIGHT;
-        if (t) return HTTOP;
-        if (btm) return HTBOTTOM;
+        // Borderless: drag anywhere to move. There's no resizing, since the
+        // size always follows the source.
         return HTCAPTION;
+    }
+    case WM_GETMINMAXINFO:
+    {
+        // Allow windows larger than the screen, e.g. a 4K source on a 1440p display.
+        auto* mmi = reinterpret_cast<MINMAXINFO*>(lp);
+        mmi->ptMaxTrackSize = { 16384, 16384 };
+        mmi->ptMaxSize = { 16384, 16384 };
+        return 0;
     }
     case WM_NCRBUTTONDOWN:
         return 0;

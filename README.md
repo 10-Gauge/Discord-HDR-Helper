@@ -74,6 +74,10 @@ pick an output device you don't listen to, such as your monitor's speakers.
   background* on prevents this in normal use.
 - **Games must be borderless or windowed.** Windows can't capture a game in
   exclusive fullscreen.
+- **The output window is always the source's exact size.** Discord records a
+  window at its size on screen, so a smaller output window means a blurrier,
+  jagged stream. The window can be larger than your screen; it stays behind
+  your other windows.
 - **Don't minimize the output window.** Discord can't capture minimized windows,
   so the output window has no minimize button. It stays behind your other
   windows instead.

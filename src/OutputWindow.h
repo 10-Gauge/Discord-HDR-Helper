@@ -17,7 +17,8 @@ public:
     void SetInBackground(bool inBackground);
     void SetVisible(bool visible);
     bool Visible() const { return m_hwnd && IsWindowVisible(m_hwnd); }
-    // Match the source resolution where it fits on screen, so Discord gets full detail.
+    // Makes the window exactly the source's resolution, even if that's larger than
+    // the screen. Discord records the window at its size, so anything smaller loses detail.
     void SizeToSource(UINT width, UINT height);
 
 private:
@@ -39,6 +40,7 @@ private:
     winrt::com_ptr<ID3D11PixelShader> m_blitPS;
     UINT m_width = 0, m_height = 0; // Swap chain buffer size
     UINT m_sourceWidth = 0, m_sourceHeight = 0; // 0 while idle
+    UINT m_sizedWidth = 0, m_sizedHeight = 0;   // Source size the window was last fitted to
 
     winrt::com_ptr<ID2D1Factory1> m_d2dFactory;
     winrt::com_ptr<IDWriteFactory> m_dwrite;
