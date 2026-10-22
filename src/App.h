@@ -37,6 +37,8 @@ public:
 
     float EffectiveWhite() const;
     float EffectivePeak() const;
+    // Automatic output level: 80 / SDR white of the output's display (1 on SDR displays).
+    float AutoStreamLevel() const { return m_autoStreamLevel; }
 
     const Gpu& GetGpu() const { return m_gpu; }
     const Tonemapper& GetTonemapper() const { return m_tonemapper; }
@@ -58,6 +60,7 @@ private:
     void ProcessFrame();
     TonemapParams Params() const;
     void UpdateAudio();
+    void UpdateOutputLevel();
 
     Gpu m_gpu;
     Tonemapper m_tonemapper;
@@ -73,6 +76,7 @@ private:
     std::wstring m_lastError;
     DisplayInfo m_display;
     bool m_settingsDirty = false;
+    float m_autoStreamLevel = 1.f;
     bool m_demo = false;
     winrt::com_ptr<ID3D11Texture2D> m_demoFrame;
 

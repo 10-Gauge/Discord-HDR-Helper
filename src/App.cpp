@@ -44,12 +44,7 @@ void App::RefreshDisplayInfo()
     if (!monitor)
         monitor = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
 
-    // The output is pre-darkened to cancel the SDR boost on HDR displays (see OutputWindow).
-    if (HWND output = m_output.Hwnd())
-    {
-        DisplayInfo outputDisplay = QueryDisplay(MonitorFromWindow(output, MONITOR_DEFAULTTONEAREST));
-        m_output.SetSdrWhite(outputDisplay.hdr ? outputDisplay.sdrWhiteNits : 80.f);
-    }
+    UpdateOutputLevel();
 
     float oldWhite = EffectiveWhite(), oldPeak = EffectivePeak();
     m_display = QueryDisplay(monitor);
@@ -63,8 +58,20 @@ void App::RefreshDisplayInfo()
     }
 }
 
+// The output is pre-darkened to cancel the SDR boost on HDR displays (see OutputWindow).
+void App::UpdateOutputLevel()
+{
+    if (HWND output = m_output.Hwnd())
+    {
+        DisplayInfo outputDisplay = QueryDisplay(MonitorFromWindow(output, MONITOR_DEFAULTTONEAREST));
+        m_autoStreamLevel = outputDisplay.hdr ? 80.f / std::max(outputDisplay.sdrWhiteNits, 80.f) : 1.f;
+    }
+    m_output.SetLevel(settings.streamLevel > 0 ? settings.streamLevel / 100.f : m_autoStreamLevel);
+}
+
 void App::ApplySettings()
 {
+    UpdateOutputLevel();
     m_settingsDirty = true;
     if (m_capture)
         m_capture->SetCaptureCursor(settings.captureCursor);

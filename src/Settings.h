@@ -16,6 +16,7 @@ struct Settings
     bool captureCursor = true;
     bool outputInBackground = true; // Keep the output window under all other windows
     bool hidePanelFromCapture = true; // Keep the control panel out of the stream
+    int streamLevel = 0; // Output level in percent to offset Discord's brightening; 0 = auto (80 / SDR white)
 
     bool audioEnabled = true;   // Replay app audio so Discord's window share carries it
     int audioMode = 0;          // 0 = the captured window's app (all apps for a display), 1 = all apps

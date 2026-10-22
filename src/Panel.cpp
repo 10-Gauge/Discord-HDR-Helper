@@ -1164,6 +1164,32 @@ void Panel::DrawOptions(float width)
     changed |= Toggle("Keep output window in background", &s.outputInBackground);
     changed |= Toggle("Hide this panel from the stream", &s.hidePanelFromCapture);
 
+    // Stream level: how much the output is darkened to offset Discord brightening it.
+    ImGui::Dummy(ImVec2(0, S(4)));
+    int level = s.streamLevel > 0 ? s.streamLevel : int(std::lround(m_app.AutoStreamLevel() * 100.f));
+    char value[48];
+    snprintf(value, sizeof(value), "%d%%%s", level, s.streamLevel == 0 ? "  \xC2\xB7  auto" : "");
+    ImGui::TextUnformatted("Stream brightness");
+    ImGui::SameLine();
+    ImVec2 vs = ImGui::CalcTextSize(value);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - vs.x);
+    ImGui::PushStyleColor(ImGuiCol_Text, Vec(kMuted));
+    ImGui::TextUnformatted(value);
+    ImGui::PopStyleColor();
+    if (NitsSlider("##streamlevel", &level, 10, 100, false, 1))
+    {
+        s.streamLevel = std::max(level, 10);
+        changed = true;
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Raise it if the stream looks too dark, lower it if it looks washed out.");
+    bool autoLevel = s.streamLevel == 0;
+    if (Toggle("Match Windows SDR brightness", &autoLevel))
+    {
+        s.streamLevel = autoLevel ? 0 : level;
+        changed = true;
+    }
+
     ImGui::Dummy(ImVec2(0, S(2)));
     ImGui::PushFont(m_fontSmall);
     MutedText("The output window always matches the source's resolution, so Discord gets every pixel. "

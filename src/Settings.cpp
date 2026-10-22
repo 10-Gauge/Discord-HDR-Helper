@@ -37,6 +37,7 @@ void Settings::Load()
     captureCursor = GetPrivateProfileIntW(kSection, L"CaptureCursor", 1, path.c_str()) != 0;
     outputInBackground = GetPrivateProfileIntW(kSection, L"OutputInBackground", 1, path.c_str()) != 0;
     hidePanelFromCapture = GetPrivateProfileIntW(kSection, L"HidePanelFromCapture", 1, path.c_str()) != 0;
+    streamLevel = std::clamp<int>(GetPrivateProfileIntW(kSection, L"StreamLevel", 0, path.c_str()), 0, 100);
     audioEnabled = GetPrivateProfileIntW(kAudioSection, L"Enabled", 1, path.c_str()) != 0;
     audioMode = std::clamp<int>(GetPrivateProfileIntW(kAudioSection, L"Mode", 0, path.c_str()), 0, 1);
     wchar_t device[512] = {};
@@ -55,6 +56,7 @@ void Settings::Save() const
     WriteInt(path, L"CaptureCursor", captureCursor ? 1 : 0);
     WriteInt(path, L"OutputInBackground", outputInBackground ? 1 : 0);
     WriteInt(path, L"HidePanelFromCapture", hidePanelFromCapture ? 1 : 0);
+    WriteInt(path, L"StreamLevel", streamLevel);
     WritePrivateProfileStringW(kAudioSection, L"Enabled", audioEnabled ? L"1" : L"0", path.c_str());
     WritePrivateProfileStringW(kAudioSection, L"Mode", std::to_wstring(audioMode).c_str(), path.c_str());
     WritePrivateProfileStringW(kAudioSection, L"Device", audioDevice.c_str(), path.c_str());
