@@ -12,7 +12,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCmd)
     {
         if (HWND existing = FindWindowW(L"DiscordHDRHelperPanel", nullptr))
         {
-            ShowWindow(existing, SW_RESTORE);
+            ShowWindow(existing, IsIconic(existing) ? SW_RESTORE : SW_SHOW);
             SetForegroundWindow(existing);
         }
         return 0;

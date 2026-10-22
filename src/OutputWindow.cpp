@@ -15,10 +15,10 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 )";
 }
 
-void OutputWindow::Create(HINSTANCE instance, const Gpu& gpu, std::function<void()> onRightClick)
+void OutputWindow::Create(HINSTANCE instance, const Gpu& gpu, std::function<void()> onShowPanel)
 {
     m_gpu = &gpu;
-    m_onRightClick = std::move(onRightClick);
+    m_onShowPanel = std::move(onShowPanel);
 
     WNDCLASSEXW wc{ sizeof(wc) };
     wc.lpfnWndProc = WndProc;
@@ -220,9 +220,25 @@ LRESULT OutputWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_NCRBUTTONUP:
     case WM_CONTEXTMENU:
-        if (m_onRightClick)
-            m_onRightClick();
+        if (m_onShowPanel)
+            m_onShowPanel();
         return 0;
+    case WM_ACTIVATE:
+    {
+        // Activated from the taskbar or Alt+Tab, not by a click to drag it, and not
+        // because our own panel just closed or hid.
+        DWORD pid = 0;
+        if (HWND previous = reinterpret_cast<HWND>(lp))
+            GetWindowThreadProcessId(previous, &pid);
+        if (LOWORD(wp) == WA_ACTIVE && pid != GetCurrentProcessId() && m_onShowPanel)
+            m_onShowPanel();
+        break;
+    }
+    case WM_SYSCOMMAND:
+        // Discord can't capture a minimized window, so the taskbar can't minimize it either.
+        if ((wp & 0xFFF0) == SC_MINIMIZE)
+            return 0;
+        break;
     case WM_WINDOWPOSCHANGING:
         if (m_inBackground)
         {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DiscordHDRHelper VERSION 1.1.0 LANGUAGES CXX RC)
+project(DiscordHDRHelper VERSION 1.1.1 LANGUAGES CXX RC)
 
 if(NOT MSVC)
     message(FATAL_ERROR "Discord HDR Helper uses C++/WinRT and needs the MSVC toolchain (Visual Studio 2022 or newer).")

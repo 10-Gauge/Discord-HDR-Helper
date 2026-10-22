@@ -407,6 +407,8 @@ Panel::~Panel()
     }
     if (m_hwnd)
         DestroyWindow(m_hwnd);
+    if (m_owner)
+        DestroyWindow(m_owner);
 }
 
 void Panel::Create(HINSTANCE instance, int showCmd)
@@ -424,8 +426,13 @@ void Panel::Create(HINSTANCE instance, int showCmd)
     RECT rc{ 0, 0, LONG(kWidth * m_scale), LONG(kHeight * m_scale) };
     DWORD style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRectExForDpi(&rc, style, FALSE, 0, GetDpiForSystem());
+    // The panel is owned by a hidden window so it has no taskbar button of its own.
+    // Discord's "Applications" share picks one window per app, and an unowned panel
+    // above the output would win, so the output stays the app's only main window.
+    // The output's taskbar button brings the panel back instead.
+    m_owner = CreateWindowExW(0, L"STATIC", kTitle, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     m_hwnd = CreateWindowExW(0, kClass, kTitle, style, CW_USEDEFAULT, CW_USEDEFAULT,
-                             rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, instance, this);
+                             rc.right - rc.left, rc.bottom - rc.top, m_owner, nullptr, instance, this);
     winrt::check_bool(m_hwnd != nullptr);
 
     // The window may have landed on a monitor with a different DPI than the system's.
@@ -456,8 +463,12 @@ void Panel::Create(HINSTANCE instance, int showCmd)
 
 void Panel::BringToFront()
 {
+    if (!m_hwnd)
+        return;
     if (IsIconic(m_hwnd))
         ShowWindow(m_hwnd, SW_RESTORE);
+    else if (!IsWindowVisible(m_hwnd))
+        ShowWindow(m_hwnd, SW_SHOW);
     SetForegroundWindow(m_hwnd);
 }
 
@@ -1207,6 +1218,15 @@ LRESULT Panel::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case WM_SYSCOMMAND:
+        // Without a taskbar button of its own, minimizing hides the panel. The
+        // output's taskbar button (or right-clicking the output) brings it back.
+        if ((wp & 0xFFF0) == SC_MINIMIZE)
+        {
+            ShowWindow(m_hwnd, SW_HIDE);
+            return 0;
+        }
+        break;
     case WM_CLOSE:
         DestroyWindow(m_hwnd);
         return 0;

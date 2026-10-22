@@ -54,6 +54,7 @@ private:
 
     App& m_app;
     HWND m_hwnd = nullptr;
+    HWND m_owner = nullptr; // Hidden, keeps the panel off the taskbar and out of Discord's app list
     winrt::com_ptr<IDXGISwapChain1> m_swapChain;
     winrt::com_ptr<ID3D11RenderTargetView> m_rtv;
     bool m_imguiReady = false;

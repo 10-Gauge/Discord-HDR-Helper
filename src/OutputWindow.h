@@ -10,7 +10,9 @@ class OutputWindow
 public:
     static constexpr wchar_t kTitle[] = L"Discord HDR Helper Output";
 
-    void Create(HINSTANCE instance, const Gpu& gpu, std::function<void()> onRightClick);
+    // onShowPanel runs on a right-click and when the window is activated from the
+    // taskbar or Alt+Tab, since the output's taskbar button stands in for the panel's.
+    void Create(HINSTANCE instance, const Gpu& gpu, std::function<void()> onShowPanel);
     HWND Hwnd() const { return m_hwnd; }
 
     void Present(const Tonemapper& tonemapper);
@@ -28,7 +30,7 @@ private:
 
     HWND m_hwnd = nullptr;
     const Gpu* m_gpu = nullptr;
-    std::function<void()> m_onRightClick;
+    std::function<void()> m_onShowPanel;
     bool m_inBackground = true;
 
     winrt::com_ptr<IDXGISwapChain1> m_swapChain;

@@ -77,6 +77,9 @@ pick an output device you don't listen to, such as your monitor's speakers.
 - **Don't minimize the output window.** Discord can't capture minimized windows,
   so the output window has no minimize button. It stays behind your other
   windows instead.
+- **The control panel has no taskbar button of its own.** That keeps Discord
+  from sharing it by mistake. Click *Discord HDR Helper Output* in the taskbar,
+  or right-click the output window, to bring the panel back after minimizing it.
 - Settings are saved to `%APPDATA%\DiscordHDRHelper\settings.ini`.
 
 ## How it works
