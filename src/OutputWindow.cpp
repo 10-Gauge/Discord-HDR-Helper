@@ -4,13 +4,26 @@ namespace
 {
     constexpr wchar_t kClass[] = L"DiscordHDRHelperOutput";
 
+    // The tonemapped picture is sRGB-encoded SDR. The output swap chain is
+    // linear scRGB, where 1.0 = 80 nits, so the picture is decoded and scaled
+    // so that its white lands at 80 nits. Windows brightens normal SDR windows
+    // to the "SDR content brightness" level on an HDR display, and Discord
+    // records that brightened version and clips it, which washes the stream
+    // out. At 80 nits nothing is brightened, so Discord gets the picture as is.
     constexpr char kBlitPS[] = R"(
 Texture2D<float4> image : register(t0);
 SamplerState linearClamp : register(s0);
+cbuffer Params : register(b0) { float whiteScale; float3 padding; };
+
+float3 SrgbToLinear(float3 c)
+{
+    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
 
 float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 {
-    return float4(image.SampleLevel(linearClamp, uv, 0).rgb, 1.0);
+    float3 c = saturate(image.SampleLevel(linearClamp, uv, 0).rgb);
+    return float4(SrgbToLinear(c) * whiteScale, 1.0);
 }
 )";
 }
@@ -41,7 +54,11 @@ void OutputWindow::Create(HINSTANCE instance, const Gpu& gpu, std::function<void
                              nullptr, nullptr, instance, this);
     winrt::check_bool(m_hwnd != nullptr);
 
-    m_swapChain = gpu.CreateSwapChain(m_hwnd);
+    m_swapChain = gpu.CreateSwapChain(m_hwnd, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    if (auto swapChain3 = m_swapChain.try_as<IDXGISwapChain3>())
+        swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+    D3D11_BUFFER_DESC cb{ 16, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
+    winrt::check_hresult(gpu.device->CreateBuffer(&cb, nullptr, m_params.put()));
     auto ps = CompileShader(kBlitPS, sizeof(kBlitPS) - 1, "main", "ps_5_0");
     winrt::check_hresult(gpu.device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, m_blitPS.put()));
 
@@ -149,6 +166,15 @@ void OutputWindow::Present(const Tonemapper& tonemapper)
         ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         ctx->VSSetShader(m_gpu->fullscreenVS.get(), nullptr, 0);
         ctx->PSSetShader(m_blitPS.get(), nullptr, 0);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (SUCCEEDED(ctx->Map(m_params.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+        {
+            const float params[4] = { m_whiteScale, 0.f, 0.f, 0.f };
+            memcpy(mapped.pData, params, sizeof(params));
+            ctx->Unmap(m_params.get(), 0);
+        }
+        auto* params = m_params.get();
+        ctx->PSSetConstantBuffers(0, 1, &params);
         ctx->PSSetShaderResources(0, 1, &srv);
         ctx->PSSetSamplers(0, 1, &sampler);
         ctx->Draw(3, 0);
@@ -174,7 +200,7 @@ void OutputWindow::DrawIdle()
             return;
         float dpi = static_cast<float>(GetDpiForWindow(m_hwnd));
         auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                                                  D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), dpi, dpi);
+                                                  D2D1::PixelFormat(DXGI_FORMAT_R16G16B16A16_FLOAT, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi, dpi);
         if (FAILED(m_d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, m_d2dTarget.put())))
             return;
     }

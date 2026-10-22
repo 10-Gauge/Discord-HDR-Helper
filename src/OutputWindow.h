@@ -15,6 +15,8 @@ public:
 
     void Present(const Tonemapper& tonemapper);
     void SetInBackground(bool inBackground);
+    // SDR white of the display the window is on, in nits (80 on an SDR display).
+    void SetSdrWhite(float nits) { m_whiteScale = 80.f / std::max(nits, 1.f); }
     void SetVisible(bool visible);
     bool Visible() const { return m_hwnd && IsWindowVisible(m_hwnd); }
     // Makes the window exactly the source's resolution, even if that's larger than
@@ -38,6 +40,8 @@ private:
     winrt::com_ptr<IDXGISwapChain1> m_swapChain;
     winrt::com_ptr<ID3D11RenderTargetView> m_rtv;
     winrt::com_ptr<ID3D11PixelShader> m_blitPS;
+    winrt::com_ptr<ID3D11Buffer> m_params;
+    float m_whiteScale = 1.f;
     UINT m_width = 0, m_height = 0; // Swap chain buffer size
     UINT m_sourceWidth = 0, m_sourceHeight = 0; // 0 while idle
     UINT m_sizedWidth = 0, m_sizedHeight = 0;   // Source size the window was last fitted to

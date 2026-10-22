@@ -12,7 +12,7 @@ struct Gpu
     void Init();
 
     // Flip-model 8-bit swap chain for a window.
-    winrt::com_ptr<IDXGISwapChain1> CreateSwapChain(HWND hwnd) const;
+    winrt::com_ptr<IDXGISwapChain1> CreateSwapChain(HWND hwnd, DXGI_FORMAT format = DXGI_FORMAT_B8G8R8A8_UNORM) const;
 
     // Fullscreen-triangle vertex shader shared by every pass.
     winrt::com_ptr<ID3D11VertexShader> fullscreenVS;

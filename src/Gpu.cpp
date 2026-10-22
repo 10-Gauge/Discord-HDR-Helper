@@ -71,7 +71,7 @@ void Gpu::Init()
     winrt::check_hresult(device->CreateSamplerState(&sd, linearClamp.put()));
 }
 
-winrt::com_ptr<IDXGISwapChain1> Gpu::CreateSwapChain(HWND hwnd) const
+winrt::com_ptr<IDXGISwapChain1> Gpu::CreateSwapChain(HWND hwnd, DXGI_FORMAT format) const
 {
     RECT rc{};
     GetClientRect(hwnd, &rc);
@@ -79,7 +79,7 @@ winrt::com_ptr<IDXGISwapChain1> Gpu::CreateSwapChain(HWND hwnd) const
     DXGI_SWAP_CHAIN_DESC1 desc{};
     desc.Width = std::max<LONG>(rc.right - rc.left, 1);
     desc.Height = std::max<LONG>(rc.bottom - rc.top, 1);
-    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.Format = format;
     desc.SampleDesc.Count = 1;
     desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     desc.BufferCount = 2;
