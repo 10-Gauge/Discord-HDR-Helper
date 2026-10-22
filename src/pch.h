@@ -14,6 +14,7 @@
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <d2d1_1.h>
+#include <dcomp.h>
 #include <dwrite.h>
 
 #include <winrt/base.h>

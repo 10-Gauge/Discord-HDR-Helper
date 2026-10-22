@@ -47,4 +47,4 @@ target_compile_definitions(DiscordHDRHelper PRIVATE UNICODE _UNICODE NOMINMAX WI
 target_compile_options(DiscordHDRHelper PRIVATE /W4 /permissive- /utf-8 /EHsc /bigobj)
 target_precompile_headers(DiscordHDRHelper PRIVATE src/pch.h)
 target_link_libraries(DiscordHDRHelper PRIVATE
-    imgui d3d11 dxgi d3dcompiler d2d1 dwrite dwmapi windowscodecs mmdevapi windowsapp shell32 user32 ole32)
+    imgui d3d11 dxgi d3dcompiler d2d1 dcomp dwrite dwmapi windowscodecs mmdevapi windowsapp shell32 user32 ole32)

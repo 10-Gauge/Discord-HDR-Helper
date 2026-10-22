@@ -27,9 +27,7 @@ public:
 private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp);
-    // Sizes the swap chain buffers. With a picture, they hold it at its native
-    // resolution (padded to the window's aspect ratio) and Windows scales them
-    // to the window, so whatever reads the buffers gets every source pixel.
+    // Matches the composition surface to the window's client area.
     void Resize();
     void DrawIdle();
 
@@ -38,16 +36,17 @@ private:
     std::function<void()> m_onRightClick;
     bool m_inBackground = true;
 
-    winrt::com_ptr<IDXGISwapChain1> m_swapChain;
-    winrt::com_ptr<ID3D11RenderTargetView> m_rtv;
+    winrt::com_ptr<IDCompositionDevice> m_dcomp;
+    winrt::com_ptr<IDCompositionTarget> m_dcompTarget;
+    winrt::com_ptr<IDCompositionVisual> m_visual;
+    winrt::com_ptr<IDCompositionSurface> m_surface;
     winrt::com_ptr<ID3D11PixelShader> m_blitPS;
     winrt::com_ptr<ID3D11Buffer> m_params;
     float m_whiteScale = 1.f;
-    UINT m_width = 0, m_height = 0; // Swap chain buffer size
+    UINT m_width = 0, m_height = 0; // Surface size
     UINT m_sourceWidth = 0, m_sourceHeight = 0; // 0 while idle
     UINT m_sizedWidth = 0, m_sizedHeight = 0;   // Source size the window was last fitted to
 
     winrt::com_ptr<ID2D1Factory1> m_d2dFactory;
     winrt::com_ptr<IDWriteFactory> m_dwrite;
-    winrt::com_ptr<ID2D1RenderTarget> m_d2dTarget;
 };

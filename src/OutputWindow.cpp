@@ -62,11 +62,19 @@ void OutputWindow::Create(HINSTANCE instance, const Gpu& gpu, std::function<void
     int y = mi.rcWork.top + ((mi.rcWork.bottom - mi.rcWork.top) - h) / 2;
 
     // No minimize box on purpose: Discord can't capture a minimized window.
-    m_hwnd = CreateWindowExW(WS_EX_APPWINDOW, kClass, kTitle, WS_POPUP, x, y, w, h,
+    m_hwnd = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP, kClass, kTitle, WS_POPUP, x, y, w, h,
                              nullptr, nullptr, instance, this);
     winrt::check_bool(m_hwnd != nullptr);
 
-    m_swapChain = gpu.CreateSwapChain(m_hwnd);
+    // The picture goes to the window through DirectComposition, the way browsers
+    // draw, not through a swap chain. Discord treats a window that presents a
+    // swap chain like a game and runs its own HDR processing on it, which
+    // washes the stream out or darkens it. A composition surface is captured
+    // like any other window.
+    winrt::check_hresult(DCompositionCreateDevice(gpu.device.as<IDXGIDevice>().get(), IID_PPV_ARGS(m_dcomp.put())));
+    winrt::check_hresult(m_dcomp->CreateTargetForHwnd(m_hwnd, TRUE, m_dcompTarget.put()));
+    winrt::check_hresult(m_dcomp->CreateVisual(m_visual.put()));
+    winrt::check_hresult(m_dcompTarget->SetRoot(m_visual.get()));
     D3D11_BUFFER_DESC cb{ 16, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
     winrt::check_hresult(gpu.device->CreateBuffer(&cb, nullptr, m_params.put()));
     auto ps = CompileShader(kBlitPS, sizeof(kBlitPS) - 1, "main", "ps_5_0");
@@ -115,62 +123,66 @@ void OutputWindow::SizeToSource(UINT width, UINT height)
 
 void OutputWindow::Resize()
 {
-    if (!m_swapChain)
+    if (!m_dcomp)
         return;
     RECT rc{};
     GetClientRect(m_hwnd, &rc);
-    UINT width = std::max<UINT>(rc.right - rc.left, 1);
-    UINT height = std::max<UINT>(rc.bottom - rc.top, 1);
-    if (m_sourceWidth && m_sourceHeight)
-    {
-        // Smallest buffer with the window's aspect ratio that holds the source 1:1.
-        double aspect = double(width) / height;
-        width = std::max<UINT>(m_sourceWidth, UINT(std::lround(m_sourceHeight * aspect)));
-        height = std::max<UINT>(m_sourceHeight, UINT(std::lround(m_sourceWidth / aspect)));
-        width = std::min<UINT>(width, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
-        height = std::min<UINT>(height, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
-    }
-    if (m_rtv && width == m_width && height == m_height)
+    UINT width = std::clamp<UINT>(rc.right - rc.left, 1, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
+    UINT height = std::clamp<UINT>(rc.bottom - rc.top, 1, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
+    if (m_surface && width == m_width && height == m_height)
         return;
 
-    m_gpu->context->OMSetRenderTargets(0, nullptr, nullptr);
-    m_rtv = nullptr;
-    m_d2dTarget = nullptr;
-    m_gpu->context->Flush();
-    winrt::check_hresult(m_swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0));
+    m_surface = nullptr;
+    if (FAILED(m_dcomp->CreateSurface(width, height, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE, m_surface.put())))
+        return;
+    m_visual->SetContent(m_surface.get());
     m_width = width;
     m_height = height;
-
-    winrt::com_ptr<ID3D11Texture2D> backBuffer;
-    winrt::check_hresult(m_swapChain->GetBuffer(0, IID_PPV_ARGS(backBuffer.put())));
-    winrt::check_hresult(m_gpu->device->CreateRenderTargetView(backBuffer.get(), nullptr, m_rtv.put()));
 }
 
 void OutputWindow::Present(const Tonemapper& tonemapper)
 {
-    if (!m_rtv || !Visible())
+    if (!m_dcomp || !Visible())
         return;
     m_sourceWidth = tonemapper.HasOutput() ? tonemapper.Width() : 0;
     m_sourceHeight = tonemapper.HasOutput() ? tonemapper.Height() : 0;
     if (m_sourceWidth && (m_sourceWidth != m_sizedWidth || m_sourceHeight != m_sizedHeight))
         SizeToSource(m_sourceWidth, m_sourceHeight); // The source was resized
     Resize();
-    auto* ctx = m_gpu->context.get();
-    const float black[4] = { 0, 0, 0, 1 };
-    ctx->ClearRenderTargetView(m_rtv.get(), black);
+    if (!m_surface)
+        return;
 
-    if (tonemapper.HasOutput())
+    if (!tonemapper.HasOutput())
     {
-        // Letterbox to keep the source's aspect ratio. The buffer is at least the
-        // source's size, so this is normally an exact 1:1 copy on whole pixels.
+        DrawIdle();
+        m_dcomp->Commit();
+        return;
+    }
+
+    // The surface may live in a shared texture at an offset, so draw only
+    // inside our rectangle.
+    winrt::com_ptr<ID3D11Texture2D> texture;
+    POINT offset{};
+    if (FAILED(m_surface->BeginDraw(nullptr, IID_PPV_ARGS(texture.put()), &offset)))
+        return;
+    auto* ctx = m_gpu->context.get();
+    winrt::com_ptr<ID3D11RenderTargetView> rtv;
+    if (SUCCEEDED(m_gpu->device->CreateRenderTargetView(texture.get(), nullptr, rtv.put())))
+    {
+        // Letterbox to keep the source's aspect ratio. The window is sized to the
+        // source, so this is normally an exact 1:1 copy.
+        const float black[4] = { 0, 0, 0, 1 };
+        D3D11_RECT area{ offset.x, offset.y, LONG(offset.x + m_width), LONG(offset.y + m_height) };
+        if (auto ctx1 = m_gpu->context.try_as<ID3D11DeviceContext1>())
+            ctx1->ClearView(rtv.get(), black, &area, 1);
         float scale = std::min({ 1.f, float(m_width) / tonemapper.Width(), float(m_height) / tonemapper.Height() });
         float w = std::floor(tonemapper.Width() * scale), h = std::floor(tonemapper.Height() * scale);
-        D3D11_VIEWPORT vp{ std::floor((m_width - w) * 0.5f), std::floor((m_height - h) * 0.5f), w, h, 0.f, 1.f };
+        D3D11_VIEWPORT vp{ offset.x + std::floor((m_width - w) * 0.5f), offset.y + std::floor((m_height - h) * 0.5f), w, h, 0.f, 1.f };
 
-        auto* rtv = m_rtv.get();
+        auto* target = rtv.get();
         auto* srv = tonemapper.OutputSrv();
         auto* sampler = m_gpu->linearClamp.get();
-        ctx->OMSetRenderTargets(1, &rtv, nullptr);
+        ctx->OMSetRenderTargets(1, &target, nullptr);
         ctx->RSSetViewports(1, &vp);
         ctx->IASetInputLayout(nullptr);
         ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -192,47 +204,46 @@ void OutputWindow::Present(const Tonemapper& tonemapper)
         ctx->PSSetShaderResources(0, 1, &nullSrv);
         ctx->OMSetRenderTargets(0, nullptr, nullptr);
     }
-    else
-    {
-        DrawIdle();
-    }
-
-    // Don't wait for vsync here; the control panel's present paces the loop.
-    m_swapChain->Present(0, 0);
+    m_surface->EndDraw();
+    m_dcomp->Commit();
 }
 
 void OutputWindow::DrawIdle()
 {
-    if (!m_d2dTarget)
-    {
-        winrt::com_ptr<IDXGISurface> surface;
-        if (FAILED(m_swapChain->GetBuffer(0, IID_PPV_ARGS(surface.put()))))
-            return;
-        float dpi = static_cast<float>(GetDpiForWindow(m_hwnd));
-        auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                                                  D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), dpi, dpi);
-        if (FAILED(m_d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, m_d2dTarget.put())))
-            return;
-    }
-
-    winrt::com_ptr<IDWriteTextFormat> format;
-    if (FAILED(m_dwrite->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_LIGHT, DWRITE_FONT_STYLE_NORMAL,
-                                          DWRITE_FONT_STRETCH_NORMAL, 18.f, L"", format.put())))
+    winrt::com_ptr<IDXGISurface> surface;
+    POINT offset{};
+    if (FAILED(m_surface->BeginDraw(nullptr, IID_PPV_ARGS(surface.put()), &offset)))
         return;
-    format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
-    m_d2dTarget->BeginDraw();
-    winrt::com_ptr<ID2D1SolidColorBrush> brush;
-    m_d2dTarget->CreateSolidColorBrush(D2D1::ColorF(0x6D6F78), brush.put());
-    if (brush)
+    float dpi = static_cast<float>(GetDpiForWindow(m_hwnd));
+    auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                                              D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), dpi, dpi);
+    winrt::com_ptr<ID2D1RenderTarget> target;
+    winrt::com_ptr<IDWriteTextFormat> format;
+    if (SUCCEEDED(m_d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, target.put())) &&
+        SUCCEEDED(m_dwrite->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_LIGHT, DWRITE_FONT_STYLE_NORMAL,
+                                             DWRITE_FONT_STRETCH_NORMAL, 18.f, L"", format.put())))
     {
-        constexpr wchar_t text[] = L"Waiting for a source…";
-        auto size = m_d2dTarget->GetSize();
-        m_d2dTarget->DrawText(text, UINT32(std::size(text) - 1), format.get(), D2D1::RectF(0, 0, size.width, size.height), brush.get());
+        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        // D2D works in DIPs; place our rectangle at the surface's offset.
+        float toDip = 96.f / dpi;
+        D2D1_RECT_F rect = D2D1::RectF(offset.x * toDip, offset.y * toDip, (offset.x + m_width) * toDip, (offset.y + m_height) * toDip);
+        target->BeginDraw();
+        target->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_ALIASED);
+        target->Clear(D2D1::ColorF(0, 0, 0));
+        winrt::com_ptr<ID2D1SolidColorBrush> brush;
+        target->CreateSolidColorBrush(D2D1::ColorF(0x6D6F78), brush.put());
+        if (brush)
+        {
+            constexpr wchar_t text[] = L"Waiting for a source…";
+            target->DrawText(text, UINT32(std::size(text) - 1), format.get(), rect, brush.get());
+        }
+        target->PopAxisAlignedClip();
+        target->EndDraw();
     }
-    if (m_d2dTarget->EndDraw() == D2DERR_RECREATE_TARGET)
-        m_d2dTarget = nullptr;
+    m_surface->EndDraw();
 }
 
 LRESULT CALLBACK OutputWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
