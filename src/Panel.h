@@ -84,4 +84,5 @@ private:
     std::vector<WindowEntry> m_windows;
     std::chrono::steady_clock::time_point m_lastSourceRefresh{};
     std::wstring m_screenshotPath;
+    std::function<void()> m_pendingAction; // Runs after the frame is rendered
 };

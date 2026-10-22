@@ -748,6 +748,11 @@ bool Panel::Render()
         }
     }
 
+    // Source changes run only now: the frame drawn above still referenced the
+    // old picture, which they release.
+    if (auto action = std::exchange(m_pendingAction, nullptr))
+        action();
+
     // Pace the loop to the display's refresh, as a vsynced present would.
     if (FAILED(DwmFlush()))
         Sleep(8);
@@ -899,7 +904,7 @@ void Panel::DrawSources(float width, float height)
     {
         ImGui::SetCursorPos(ImVec2(x + segW + btnW + S(16), rowStart.y));
         if (PrimaryButton(ICON_STOP "  Stop", ImVec2(stopW, btnW), true))
-            m_app.StopCapture();
+            m_pendingAction = [this] { m_app.StopCapture(); };
     }
 
     ImGui::SetCursorPos(ImVec2(rowStart.x, rowStart.y + ImGui::GetFrameHeight() + S(12)));
@@ -924,7 +929,7 @@ void Panel::DrawSources(float width, float height)
             bool active = m_app.Capturing() && m_app.SourceMonitor() == d.monitor;
             ImGui::PushID(int(i));
             if (SourceRow("##display", m_fontIcon, m_fontSemibold, m_fontSmall, ICON_DISPLAY, title, detail, active) && !active)
-                m_app.CaptureMonitor(d);
+                m_pendingAction = [this, d] { m_app.CaptureMonitor(d); };
             ImGui::PopID();
         }
     }
@@ -939,7 +944,7 @@ void Panel::DrawSources(float width, float height)
             ImGui::PushID(int(i));
             if (SourceRow("##window", m_fontIcon, m_fontSemibold, m_fontSmall, ICON_WINDOW, w.titleUtf8,
                           w.processUtf8.empty() ? "Window" : w.processUtf8, active) && !active)
-                m_app.CaptureWindow(w.hwnd, w.title);
+                m_pendingAction = [this, hwnd = w.hwnd, title = w.title] { m_app.CaptureWindow(hwnd, title); };
             ImGui::PopID();
         }
     }
