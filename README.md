@@ -79,9 +79,10 @@ pick an output device you don't listen to, such as your monitor's speakers.
   window at its size on screen, so a smaller output window means a blurrier,
   jagged stream. The window can be larger than your screen; it stays behind
   your other windows.
-- **The output window looks dim on an HDR display.** That's on purpose: it's
-  drawn at 80-nit white so Windows doesn't brighten it, which would wash out
-  the stream. Viewers see normal brightness.
+- **The output window looks dim on an HDR display.** That's on purpose: Discord
+  brightens the window by your *SDR content brightness* setting, which would
+  wash out the stream, so the output is darkened by the same amount first.
+  Viewers see normal brightness.
 - **Don't minimize the output window.** Discord can't capture minimized windows,
   so the output window has no minimize button. It stays behind your other
   windows instead.

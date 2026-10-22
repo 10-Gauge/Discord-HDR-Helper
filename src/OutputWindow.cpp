@@ -4,12 +4,12 @@ namespace
 {
     constexpr wchar_t kClass[] = L"DiscordHDRHelperOutput";
 
-    // The tonemapped picture is sRGB-encoded SDR. The output swap chain is
-    // linear scRGB, where 1.0 = 80 nits, so the picture is decoded and scaled
-    // so that its white lands at 80 nits. Windows brightens normal SDR windows
-    // to the "SDR content brightness" level on an HDR display, and Discord
-    // records that brightened version and clips it, which washes the stream
-    // out. At 80 nits nothing is brightened, so Discord gets the picture as is.
+    // The tonemapped picture is sRGB-encoded SDR. On an HDR display, Discord
+    // records the window brightened by SDR white / 80 (the "SDR content
+    // brightness" slider) and clips it, which washes the stream out. So the
+    // picture is pre-darkened by the inverse (whiteScale = 80 / SDR white) and
+    // the boost brings it back. It stays a plain 8-bit sRGB window, since
+    // Discord reads the frames as-is; a little dither hides banding.
     constexpr char kBlitPS[] = R"(
 Texture2D<float4> image : register(t0);
 SamplerState linearClamp : register(s0);
@@ -20,10 +20,22 @@ float3 SrgbToLinear(float3 c)
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
 }
 
+float3 LinearToSrgb(float3 c)
+{
+    return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+}
+
 float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 {
     float3 c = saturate(image.SampleLevel(linearClamp, uv, 0).rgb);
-    return float4(SrgbToLinear(c) * whiteScale, 1.0);
+    if (whiteScale < 0.999)
+    {
+        c = LinearToSrgb(SrgbToLinear(c) * whiteScale);
+        // Interleaved gradient noise, +-0.5 of an 8-bit step.
+        float noise = frac(52.9829189 * frac(dot(pos.xy, float2(0.06711056, 0.00583715))));
+        c = saturate(c + (noise - 0.5) / 255.0);
+    }
+    return float4(c, 1.0);
 }
 )";
 }
@@ -54,9 +66,7 @@ void OutputWindow::Create(HINSTANCE instance, const Gpu& gpu, std::function<void
                              nullptr, nullptr, instance, this);
     winrt::check_bool(m_hwnd != nullptr);
 
-    m_swapChain = gpu.CreateSwapChain(m_hwnd, DXGI_FORMAT_R16G16B16A16_FLOAT);
-    if (auto swapChain3 = m_swapChain.try_as<IDXGISwapChain3>())
-        swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+    m_swapChain = gpu.CreateSwapChain(m_hwnd);
     D3D11_BUFFER_DESC cb{ 16, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
     winrt::check_hresult(gpu.device->CreateBuffer(&cb, nullptr, m_params.put()));
     auto ps = CompileShader(kBlitPS, sizeof(kBlitPS) - 1, "main", "ps_5_0");
@@ -200,7 +210,7 @@ void OutputWindow::DrawIdle()
             return;
         float dpi = static_cast<float>(GetDpiForWindow(m_hwnd));
         auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                                                  D2D1::PixelFormat(DXGI_FORMAT_R16G16B16A16_FLOAT, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi, dpi);
+                                                  D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), dpi, dpi);
         if (FAILED(m_d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, m_d2dTarget.put())))
             return;
     }

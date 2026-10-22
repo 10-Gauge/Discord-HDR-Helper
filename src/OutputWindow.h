@@ -16,6 +16,7 @@ public:
     void Present(const Tonemapper& tonemapper);
     void SetInBackground(bool inBackground);
     // SDR white of the display the window is on, in nits (80 on an SDR display).
+    // The picture is pre-darkened by 80 / nits to undo Discord's SDR boost.
     void SetSdrWhite(float nits) { m_whiteScale = 80.f / std::max(nits, 1.f); }
     void SetVisible(bool visible);
     bool Visible() const { return m_hwnd && IsWindowVisible(m_hwnd); }

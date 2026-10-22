@@ -44,7 +44,7 @@ void App::RefreshDisplayInfo()
     if (!monitor)
         monitor = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
 
-    // The output window is drawn at 80 nits on HDR displays (see OutputWindow).
+    // The output is pre-darkened to cancel the SDR boost on HDR displays (see OutputWindow).
     if (HWND output = m_output.Hwnd())
     {
         DisplayInfo outputDisplay = QueryDisplay(MonitorFromWindow(output, MONITOR_DEFAULTTONEAREST));
