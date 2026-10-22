@@ -974,25 +974,18 @@ void Panel::DrawPicture(float width)
         ImGui::PopStyleColor();
     };
 
-    // Stream brightness, the main control: how much the output is darkened to
-    // offset Discord brightening it on an HDR display.
-    int level = s.streamLevel > 0 ? s.streamLevel : int(std::lround(m_app.AutoStreamLevel() * 100.f));
+    // Stream brightness, the main control: a final dimming of the output.
+    int level = s.streamLevel;
     char value[64];
-    snprintf(value, sizeof(value), "%d%%%s", level, s.streamLevel == 0 ? "  \xC2\xB7  auto" : "");
+    snprintf(value, sizeof(value), "%d%%", level);
     valueRow("Stream brightness", value);
     if (NitsSlider("##streamlevel", &level, 10, 100, false, 1))
     {
-        s.streamLevel = std::max(level, 10);
+        s.streamLevel = level;
         changed = true;
     }
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Raise it if the stream looks too dark, lower it if it looks washed out.");
-    bool autoLevel = s.streamLevel == 0;
-    if (Toggle("Automatic (from Windows SDR brightness)", &autoLevel))
-    {
-        s.streamLevel = autoLevel ? 0 : level;
-        changed = true;
-    }
+        ImGui::SetTooltip("Lower it if the stream looks too bright.");
 
     ImGui::Dummy(ImVec2(0, S(4)));
     Toggle("Advanced tonemapping", &m_showAdvanced);

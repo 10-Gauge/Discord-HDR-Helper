@@ -4,12 +4,8 @@ namespace
 {
     constexpr wchar_t kClass[] = L"DiscordHDRHelperOutput";
 
-    // The tonemapped picture is sRGB-encoded SDR. On an HDR display, Discord
-    // records the window brightened by SDR white / 80 (the "SDR content
-    // brightness" slider) and clips it, which washes the stream out. So the
-    // picture is pre-darkened by the inverse (whiteScale = 80 / SDR white) and
-    // the boost brings it back. It stays a plain 8-bit sRGB window, since
-    // Discord reads the frames as-is; a little dither hides banding.
+    // The tonemapped picture is sRGB-encoded SDR. whiteScale dims it in linear
+    // light (the Stream brightness setting); a little dither hides banding.
     constexpr char kBlitPS[] = R"(
 Texture2D<float4> image : register(t0);
 SamplerState linearClamp : register(s0);

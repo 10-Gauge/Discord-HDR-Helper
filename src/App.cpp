@@ -58,15 +58,9 @@ void App::RefreshDisplayInfo()
     }
 }
 
-// The output is pre-darkened to cancel the SDR boost on HDR displays (see OutputWindow).
 void App::UpdateOutputLevel()
 {
-    if (HWND output = m_output.Hwnd())
-    {
-        DisplayInfo outputDisplay = QueryDisplay(MonitorFromWindow(output, MONITOR_DEFAULTTONEAREST));
-        m_autoStreamLevel = outputDisplay.hdr ? 80.f / std::max(outputDisplay.sdrWhiteNits, 80.f) : 1.f;
-    }
-    m_output.SetLevel(settings.streamLevel > 0 ? settings.streamLevel / 100.f : m_autoStreamLevel);
+    m_output.SetLevel(settings.streamLevel / 100.f);
 }
 
 void App::ApplySettings()
