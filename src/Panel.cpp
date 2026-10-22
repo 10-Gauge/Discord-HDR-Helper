@@ -28,7 +28,8 @@ using namespace std::chrono;
 namespace
 {
     constexpr wchar_t kClass[] = L"DiscordHDRHelperPanel";
-    constexpr wchar_t kTitle[] = L"Discord HDR Helper";
+    // Distinct from the output window, so it is clearly not the one to share in Discord.
+    constexpr wchar_t kTitle[] = L"Discord HDR Helper Settings";
     constexpr char kVersion[] = "v" APP_VERSION;
     constexpr wchar_t kRepoUrl[] = L"https://github.com/10-Gauge/Discord-HDR-Helper";
 

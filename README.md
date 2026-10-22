@@ -52,7 +52,8 @@ your screen the way it's meant to look.
    (or the newest successful [build](https://github.com/10-Gauge/Discord-HDR-Helper/actions/workflows/build.yml)).
 2. Run it and pick a **display** or a **window** under *Source*.
 3. In Discord, start a screen share, open the **Applications** tab and choose
-   **Discord HDR Helper Output**.
+   **Discord HDR Helper Output**. Not *Discord HDR Helper Settings*: that's the
+   control panel, and sharing it gives a stream at the panel's size.
 4. If the stream looks too bright or too dark, adjust **Brightness**.
 
 ### Audio
@@ -78,6 +79,9 @@ pick an output device you don't listen to, such as your monitor's speakers.
   window at its size on screen, so a smaller output window means a blurrier,
   jagged stream. The window can be larger than your screen; it stays behind
   your other windows.
+- **The output window looks dim on an HDR display.** That's on purpose: it's
+  drawn at 80-nit white so Windows doesn't brighten it, which would wash out
+  the stream. Viewers see normal brightness.
 - **Don't minimize the output window.** Discord can't capture minimized windows,
   so the output window has no minimize button. It stays behind your other
   windows instead.
