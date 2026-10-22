@@ -54,7 +54,8 @@ your screen the way it's meant to look.
 3. In Discord, start a screen share, open the **Applications** tab and choose
    **Discord HDR Helper Output**. Not *Discord HDR Helper Settings*: that's the
    control panel, and sharing it gives a stream at the panel's size.
-4. If the stream looks too bright or too dark, adjust **Brightness**.
+4. If the stream looks too bright or too dark, adjust **Stream brightness** on
+   the *Picture* tab. The tonemapping settings are under *Advanced tonemapping*.
 
 ### Audio
 

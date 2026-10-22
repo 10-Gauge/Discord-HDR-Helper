@@ -79,6 +79,7 @@ private:
 
     int m_sourceTab = 0;   // 0 = displays, 1 = windows
     int m_settingsTab = 0; // 0 = picture, 1 = audio, 2 = options
+    bool m_showAdvanced = false;
     std::vector<AudioPassthrough::Device> m_audioDevices;
     std::vector<DisplayInfo> m_displays;
     std::vector<WindowEntry> m_windows;
