@@ -39,7 +39,8 @@ private:
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp);
-    void ResizeSwapChain();
+    void ResizeTarget();
+    void PaintWindow(HDC dc);
     void BuildFonts();
     void ApplyStyle();
     void RefreshSources(bool force);
@@ -54,9 +55,17 @@ private:
 
     App& m_app;
     HWND m_hwnd = nullptr;
-    HWND m_owner = nullptr; // Hidden, keeps the panel off the taskbar and out of Discord's app list
-    winrt::com_ptr<IDXGISwapChain1> m_swapChain;
+    // The panel renders offscreen and is shown with GDI instead of a DXGI swap
+    // chain. Discord's application capture hooks the app's swap chain presents,
+    // so the output window has to be the only swap chain in the process.
+    winrt::com_ptr<ID3D11Texture2D> m_target;
     winrt::com_ptr<ID3D11RenderTargetView> m_rtv;
+    winrt::com_ptr<ID3D11Texture2D> m_staging[2];
+    bool m_stagingFilled[2] = {};
+    int m_stagingIndex = 0;
+    UINT m_width = 0, m_height = 0;
+    std::vector<uint32_t> m_pixels; // Last frame read back, m_pixelsWidth x m_pixelsHeight BGRA
+    UINT m_pixelsWidth = 0, m_pixelsHeight = 0;
     bool m_imguiReady = false;
 
     float m_scale = 1.f;

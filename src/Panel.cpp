@@ -407,8 +407,6 @@ Panel::~Panel()
     }
     if (m_hwnd)
         DestroyWindow(m_hwnd);
-    if (m_owner)
-        DestroyWindow(m_owner);
 }
 
 void Panel::Create(HINSTANCE instance, int showCmd)
@@ -426,13 +424,8 @@ void Panel::Create(HINSTANCE instance, int showCmd)
     RECT rc{ 0, 0, LONG(kWidth * m_scale), LONG(kHeight * m_scale) };
     DWORD style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRectExForDpi(&rc, style, FALSE, 0, GetDpiForSystem());
-    // The panel is owned by a hidden window so it has no taskbar button of its own.
-    // Discord's "Applications" share picks one window per app, and an unowned panel
-    // above the output would win, so the output stays the app's only main window.
-    // The output's taskbar button brings the panel back instead.
-    m_owner = CreateWindowExW(0, L"STATIC", kTitle, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     m_hwnd = CreateWindowExW(0, kClass, kTitle, style, CW_USEDEFAULT, CW_USEDEFAULT,
-                             rc.right - rc.left, rc.bottom - rc.top, m_owner, nullptr, instance, this);
+                             rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, instance, this);
     winrt::check_bool(m_hwnd != nullptr);
 
     // The window may have landed on a monitor with a different DPI than the system's.
@@ -444,8 +437,7 @@ void Panel::Create(HINSTANCE instance, int showCmd)
     COLORREF caption = RGB((kBg >> 16) & 0xFF, (kBg >> 8) & 0xFF, kBg & 0xFF);
     DwmSetWindowAttribute(m_hwnd, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof(caption));
 
-    m_swapChain = m_app.GetGpu().CreateSwapChain(m_hwnd);
-    ResizeSwapChain();
+    ResizeTarget();
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -463,12 +455,8 @@ void Panel::Create(HINSTANCE instance, int showCmd)
 
 void Panel::BringToFront()
 {
-    if (!m_hwnd)
-        return;
     if (IsIconic(m_hwnd))
         ShowWindow(m_hwnd, SW_RESTORE);
-    else if (!IsWindowVisible(m_hwnd))
-        ShowWindow(m_hwnd, SW_SHOW);
     SetForegroundWindow(m_hwnd);
 }
 
@@ -478,19 +466,57 @@ void Panel::SetExcludedFromCapture(bool excluded)
     SetWindowDisplayAffinity(m_hwnd, excluded ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
 }
 
-void Panel::ResizeSwapChain()
+void Panel::ResizeTarget()
 {
     RECT rc{};
     GetClientRect(m_hwnd, &rc);
     UINT w = std::max<LONG>(rc.right - rc.left, 1), h = std::max<LONG>(rc.bottom - rc.top, 1);
+    if (m_target && w == m_width && h == m_height)
+        return;
+    auto* device = m_app.GetGpu().device.get();
     auto* ctx = m_app.GetGpu().context.get();
     ctx->OMSetRenderTargets(0, nullptr, nullptr);
     m_rtv = nullptr;
-    ctx->Flush();
-    winrt::check_hresult(m_swapChain->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, 0));
-    winrt::com_ptr<ID3D11Texture2D> backBuffer;
-    winrt::check_hresult(m_swapChain->GetBuffer(0, IID_PPV_ARGS(backBuffer.put())));
-    winrt::check_hresult(m_app.GetGpu().device->CreateRenderTargetView(backBuffer.get(), nullptr, m_rtv.put()));
+    m_target = nullptr;
+
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = w;
+    desc.Height = h;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    winrt::check_hresult(device->CreateTexture2D(&desc, nullptr, m_target.put()));
+    winrt::check_hresult(device->CreateRenderTargetView(m_target.get(), nullptr, m_rtv.put()));
+
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    for (int i = 0; i < 2; ++i)
+    {
+        m_staging[i] = nullptr;
+        winrt::check_hresult(device->CreateTexture2D(&desc, nullptr, m_staging[i].put()));
+        m_stagingFilled[i] = false;
+    }
+    m_width = w;
+    m_height = h;
+}
+
+void Panel::PaintWindow(HDC dc)
+{
+    if (m_pixels.empty())
+        return;
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = LONG(m_pixelsWidth);
+    bmi.bmiHeader.biHeight = -LONG(m_pixelsHeight); // Top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    SetDIBitsToDevice(dc, 0, 0, m_pixelsWidth, m_pixelsHeight, 0, 0, 0, m_pixelsHeight,
+                      m_pixels.data(), &bmi, DIB_RGB_COLORS);
 }
 
 void Panel::BuildFonts()
@@ -694,14 +720,38 @@ bool Panel::Render()
 
     if (!m_screenshotPath.empty())
     {
-        winrt::com_ptr<ID3D11Texture2D> backBuffer;
-        if (SUCCEEDED(m_swapChain->GetBuffer(0, IID_PPV_ARGS(backBuffer.put()))))
-            SaveTexturePng(m_app.GetGpu().device.get(), ctx, backBuffer.get(), m_screenshotPath);
+        SaveTexturePng(m_app.GetGpu().device.get(), ctx, m_target.get(), m_screenshotPath);
         m_screenshotPath.clear();
         PostQuitMessage(0);
     }
 
-    return m_swapChain->Present(1, 0) != DXGI_STATUS_OCCLUDED;
+    // Copy this frame into one staging texture and read back the previous frame
+    // from the other, so the CPU doesn't wait on the GPU.
+    ctx->CopyResource(m_staging[m_stagingIndex].get(), m_target.get());
+    m_stagingFilled[m_stagingIndex] = true;
+    m_stagingIndex ^= 1;
+    ID3D11Texture2D* ready = m_staging[m_stagingIndex].get();
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (m_stagingFilled[m_stagingIndex] && SUCCEEDED(ctx->Map(ready, 0, D3D11_MAP_READ, 0, &mapped)))
+    {
+        m_pixelsWidth = m_width;
+        m_pixelsHeight = m_height;
+        m_pixels.resize(size_t(m_width) * m_height);
+        for (UINT y = 0; y < m_height; ++y)
+            memcpy(m_pixels.data() + size_t(y) * m_width, static_cast<const uint8_t*>(mapped.pData) + size_t(y) * mapped.RowPitch,
+                   size_t(m_width) * 4);
+        ctx->Unmap(ready, 0);
+        if (HDC dc = GetDC(m_hwnd))
+        {
+            PaintWindow(dc);
+            ReleaseDC(m_hwnd, dc);
+        }
+    }
+
+    // Pace the loop to the display's refresh, as a vsynced present would.
+    if (FAILED(DwmFlush()))
+        Sleep(8);
+    return true;
 }
 
 void Panel::DrawHeader()
@@ -1188,8 +1238,8 @@ LRESULT Panel::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
     switch (msg)
     {
     case WM_SIZE:
-        if (m_swapChain && wp != SIZE_MINIMIZED)
-            ResizeSwapChain();
+        if (m_target && wp != SIZE_MINIMIZED)
+            ResizeTarget();
         return 0;
     case WM_GETMINMAXINFO:
     {
@@ -1216,17 +1266,16 @@ LRESULT Panel::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP_SOURCE_CLOSED:
         m_app.OnSourceClosed();
         return 0;
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(m_hwnd, &ps);
+        PaintWindow(dc);
+        EndPaint(m_hwnd, &ps);
+        return 0;
+    }
     case WM_ERASEBKGND:
         return 1;
-    case WM_SYSCOMMAND:
-        // Without a taskbar button of its own, minimizing hides the panel. The
-        // output's taskbar button (or right-clicking the output) brings it back.
-        if ((wp & 0xFFF0) == SC_MINIMIZE)
-        {
-            ShowWindow(m_hwnd, SW_HIDE);
-            return 0;
-        }
-        break;
     case WM_CLOSE:
         DestroyWindow(m_hwnd);
         return 0;
