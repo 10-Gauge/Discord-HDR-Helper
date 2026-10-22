@@ -65,6 +65,29 @@ namespace
         std::deque<float> queue; // Interleaved stereo samples
         bool primed = false;
 
+        // Diagnostics for the status line.
+        ULONGLONG startedAt = GetTickCount64();
+        ULONGLONG lastPacketAt = 0; // Any data from Windows, even silence
+        ULONGLONG lastSoundAt = 0;  // Data with at least one non-zero sample
+        HRESULT lastError = S_OK;
+
+        // How this capture is doing, for the status line; empty when sound is flowing.
+        std::wstring Health() const
+        {
+            ULONGLONG now = GetTickCount64();
+            if (FAILED(lastError))
+            {
+                wchar_t text[48];
+                swprintf_s(text, L"error 0x%08X", unsigned(lastError));
+                return text;
+            }
+            if (now - startedAt < 3000 || now - lastSoundAt < 3000)
+                return {};
+            if (now - lastPacketAt < 3000)
+                return L"getting only silence";
+            return L"no data from Windows";
+        }
+
         bool Start(DWORD processId)
         {
             pid = processId;
@@ -105,17 +128,34 @@ namespace
 
         void Drain()
         {
-            UINT32 packet = 0;
-            while (SUCCEEDED(capture->GetNextPacketSize(&packet)) && packet > 0)
+            // Read packets until the buffer is empty. GetBuffer is used directly
+            // rather than GetNextPacketSize, which some builds report as 0.
+            for (int guard = 0; guard < 64; ++guard)
             {
                 BYTE* data = nullptr;
                 UINT32 frames = 0;
                 DWORD flags = 0;
-                if (FAILED(capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr)))
-                    return;
+                HRESULT hr = capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+                if (FAILED(hr))
+                {
+                    lastError = hr;
+                    break;
+                }
+                if (hr == AUDCLNT_S_BUFFER_EMPTY || frames == 0)
+                    break;
+                ULONGLONG now = GetTickCount64();
+                lastPacketAt = now;
+                const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) || !data;
                 auto* samples = reinterpret_cast<const int16_t*>(data);
+                bool sound = false;
                 for (UINT32 i = 0; i < frames * kChannels; ++i)
-                    queue.push_back((flags & AUDCLNT_BUFFERFLAGS_SILENT) ? 0.f : samples[i] / 32768.f);
+                {
+                    int16_t v = silent ? 0 : samples[i];
+                    sound |= v != 0;
+                    queue.push_back(v / 32768.f);
+                }
+                if (sound)
+                    lastSoundAt = now;
                 capture->ReleaseBuffer(frames);
             }
 
@@ -432,7 +472,16 @@ void AudioPassthrough::RunPipeline(const Config& config, uint64_t generation)
 
             std::vector<std::wstring> sources;
             for (auto& kv : captures)
-                sources.push_back(ExeName(kv.first));
+            {
+                std::wstring name = ExeName(kv.first);
+                auto health = kv.second->Health();
+                if (!health.empty())
+                    name += L" (" + health + L")";
+                sources.push_back(std::move(name));
+            }
+            for (DWORD pid : failed)
+                if (wanted.count(pid))
+                    sources.push_back(ExeName(pid) + L" (Windows refused to capture it)");
             std::lock_guard lock(m_mutex);
             m_status.running = true;
             m_status.error.clear();
