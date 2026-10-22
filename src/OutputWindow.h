@@ -23,6 +23,9 @@ public:
 private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp);
+    // Sizes the swap chain buffers. With a picture, they hold it at its native
+    // resolution (padded to the window's aspect ratio) and Windows scales them
+    // to the window, so whatever reads the buffers gets every source pixel.
     void Resize();
     void DrawIdle();
 
@@ -34,7 +37,8 @@ private:
     winrt::com_ptr<IDXGISwapChain1> m_swapChain;
     winrt::com_ptr<ID3D11RenderTargetView> m_rtv;
     winrt::com_ptr<ID3D11PixelShader> m_blitPS;
-    UINT m_width = 0, m_height = 0;
+    UINT m_width = 0, m_height = 0; // Swap chain buffer size
+    UINT m_sourceWidth = 0, m_sourceHeight = 0; // 0 while idle
 
     winrt::com_ptr<ID2D1Factory1> m_d2dFactory;
     winrt::com_ptr<IDWriteFactory> m_dwrite;

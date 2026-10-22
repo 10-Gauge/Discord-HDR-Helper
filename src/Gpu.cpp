@@ -85,6 +85,7 @@ winrt::com_ptr<IDXGISwapChain1> Gpu::CreateSwapChain(HWND hwnd) const
     desc.BufferCount = 2;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    desc.Scaling = DXGI_SCALING_STRETCH; // Buffers may be larger than the window (see OutputWindow::Resize)
 
     winrt::com_ptr<IDXGISwapChain1> swapChain;
     winrt::check_hresult(factory->CreateSwapChainForHwnd(device.get(), hwnd, &desc, nullptr, nullptr, swapChain.put()));

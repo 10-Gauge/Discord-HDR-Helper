@@ -70,16 +70,20 @@ void OutputWindow::SizeToSource(UINT width, UINT height)
 {
     if (width == 0 || height == 0)
         return;
+    // Fit to the whole monitor, not just the work area, so a full-screen source
+    // (e.g. 3840x2160 on a 4K display) gets a window of exactly its size. The
+    // window normally sits behind everything, so covering the taskbar is fine.
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
-    double maxW = mi.rcWork.right - mi.rcWork.left, maxH = mi.rcWork.bottom - mi.rcWork.top;
+    const RECT& area = mi.rcMonitor;
+    double maxW = area.right - area.left, maxH = area.bottom - area.top;
     double scale = std::min({ 1.0, maxW / width, maxH / height });
     int w = std::max(1, int(width * scale)), h = std::max(1, int(height * scale));
 
     RECT rc{};
     GetWindowRect(m_hwnd, &rc);
-    int x = std::clamp<int>(rc.left, mi.rcWork.left, std::max<int>(mi.rcWork.left, mi.rcWork.right - w));
-    int y = std::clamp<int>(rc.top, mi.rcWork.top, std::max<int>(mi.rcWork.top, mi.rcWork.bottom - h));
+    int x = std::clamp<int>(rc.left, area.left, std::max<int>(area.left, area.right - w));
+    int y = std::clamp<int>(rc.top, area.top, std::max<int>(area.top, area.bottom - h));
     SetWindowPos(m_hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
@@ -91,6 +95,15 @@ void OutputWindow::Resize()
     GetClientRect(m_hwnd, &rc);
     UINT width = std::max<UINT>(rc.right - rc.left, 1);
     UINT height = std::max<UINT>(rc.bottom - rc.top, 1);
+    if (m_sourceWidth && m_sourceHeight)
+    {
+        // Smallest buffer with the window's aspect ratio that holds the source 1:1.
+        double aspect = double(width) / height;
+        width = std::max<UINT>(m_sourceWidth, UINT(std::lround(m_sourceHeight * aspect)));
+        height = std::max<UINT>(m_sourceHeight, UINT(std::lround(m_sourceWidth / aspect)));
+        width = std::min<UINT>(width, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
+        height = std::min<UINT>(height, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION);
+    }
     if (m_rtv && width == m_width && height == m_height)
         return;
 
@@ -111,16 +124,20 @@ void OutputWindow::Present(const Tonemapper& tonemapper)
 {
     if (!m_rtv || !Visible())
         return;
+    m_sourceWidth = tonemapper.HasOutput() ? tonemapper.Width() : 0;
+    m_sourceHeight = tonemapper.HasOutput() ? tonemapper.Height() : 0;
+    Resize();
     auto* ctx = m_gpu->context.get();
     const float black[4] = { 0, 0, 0, 1 };
     ctx->ClearRenderTargetView(m_rtv.get(), black);
 
     if (tonemapper.HasOutput())
     {
-        // Letterbox to keep the source's aspect ratio.
-        float scale = std::min(float(m_width) / tonemapper.Width(), float(m_height) / tonemapper.Height());
-        float w = tonemapper.Width() * scale, h = tonemapper.Height() * scale;
-        D3D11_VIEWPORT vp{ (m_width - w) * 0.5f, (m_height - h) * 0.5f, w, h, 0.f, 1.f };
+        // Letterbox to keep the source's aspect ratio. The buffer is at least the
+        // source's size, so this is normally an exact 1:1 copy on whole pixels.
+        float scale = std::min({ 1.f, float(m_width) / tonemapper.Width(), float(m_height) / tonemapper.Height() });
+        float w = std::floor(tonemapper.Width() * scale), h = std::floor(tonemapper.Height() * scale);
+        D3D11_VIEWPORT vp{ std::floor((m_width - w) * 0.5f), std::floor((m_height - h) * 0.5f), w, h, 0.f, 1.f };
 
         auto* rtv = m_rtv.get();
         auto* srv = tonemapper.OutputSrv();
