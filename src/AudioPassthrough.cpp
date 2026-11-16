@@ -70,6 +70,16 @@ namespace
         ULONGLONG lastPacketAt = 0; // Any data from Windows, even silence
         ULONGLONG lastSoundAt = 0;  // Data with at least one non-zero sample
         HRESULT lastError = S_OK;
+        std::wstring errorStage;
+
+        bool Check(HRESULT hr, const wchar_t* stage)
+        {
+            if (SUCCEEDED(hr))
+                return true;
+            lastError = hr;
+            errorStage = stage;
+            return false;
+        }
 
         // How this capture is doing, for the status line; empty when sound is flowing.
         std::wstring Health() const
@@ -79,7 +89,7 @@ namespace
             {
                 wchar_t text[48];
                 swprintf_s(text, L"error 0x%08X", unsigned(lastError));
-                return text;
+                return errorStage + L": " + text;
             }
             if (now - startedAt < 3000 || now - lastSoundAt < 3000)
                 return {};
@@ -102,28 +112,31 @@ namespace
 
             auto handler = winrt::make_self<ActivationHandler>();
             winrt::com_ptr<IActivateAudioInterfaceAsyncOperation> op;
-            if (FAILED(ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &pv,
-                                                   handler.get(), op.put())))
+            if (!Check(ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &pv,
+                                                   handler.get(), op.put()), L"Activate process loopback"))
                 return false;
-            if (WaitForSingleObject(handler->done.get(), 5000) != WAIT_OBJECT_0)
-                return false;
+            DWORD wait = WaitForSingleObject(handler->done.get(), 5000);
+            if (wait != WAIT_OBJECT_0)
+                return Check(HRESULT_FROM_WIN32(wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError()), L"Wait for audio activation");
 
             HRESULT activateResult = E_FAIL;
             winrt::com_ptr<::IUnknown> unknown;
-            if (FAILED(op->GetActivateResult(&activateResult, unknown.put())) || FAILED(activateResult) || !unknown)
+            if (!Check(op->GetActivateResult(&activateResult, unknown.put()), L"Get activation result") ||
+                !Check(activateResult, L"Activate process loopback") || !Check(unknown ? S_OK : E_POINTER, L"Get audio client"))
                 return false;
-            client = unknown.as<IAudioClient>();
+            if (!Check(unknown->QueryInterface(IID_PPV_ARGS(client.put())), L"Get audio client"))
+                return false;
 
             // Process loopback has no mix format of its own; we ask for 48 kHz 16-bit stereo.
             WAVEFORMATEX format = PcmFormat();
             DWORD flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
-            if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, kBufferDuration * 5, 0, &format, nullptr)))
+            if (!Check(client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, kBufferDuration * 5, 0, &format, nullptr), L"Initialize capture"))
                 return false;
-            if (FAILED(client->SetEventHandle(event.get())))
+            if (!Check(client->SetEventHandle(event.get()), L"Set capture event"))
                 return false;
-            if (FAILED(client->GetService(IID_PPV_ARGS(capture.put()))))
+            if (!Check(client->GetService(IID_PPV_ARGS(capture.put())), L"Get capture service"))
                 return false;
-            return SUCCEEDED(client->Start());
+            return Check(client->Start(), L"Start capture");
         }
 
         void Drain()
@@ -136,11 +149,8 @@ namespace
                 UINT32 frames = 0;
                 DWORD flags = 0;
                 HRESULT hr = capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
-                if (FAILED(hr))
-                {
-                    lastError = hr;
+                if (!Check(hr, L"Read capture packet"))
                     break;
-                }
                 if (hr == AUDCLNT_S_BUFFER_EMPTY || frames == 0)
                     break;
                 ULONGLONG now = GetTickCount64();
@@ -156,7 +166,8 @@ namespace
                 }
                 if (sound)
                     lastSoundAt = now;
-                capture->ReleaseBuffer(frames);
+                if (!Check(capture->ReleaseBuffer(frames), L"Release capture packet"))
+                    break;
             }
 
             // Keep latency bounded if playback can't keep up.
@@ -382,7 +393,9 @@ void AudioPassthrough::ThreadMain()
             {
                 std::lock_guard lock(m_mutex);
                 m_status = {};
-                m_status.error = std::wstring(e.message());
+                wchar_t code[32];
+                swprintf_s(code, L" (0x%08X)", unsigned(e.code()));
+                m_status.error = std::wstring(e.message()) + code;
             }
         }
         else
@@ -408,39 +421,39 @@ void AudioPassthrough::RunPipeline(const Config& config, uint64_t generation)
     // Playback on the chosen device.
     winrt::com_ptr<IMMDeviceEnumerator> enumerator;
     winrt::check_hresult(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(enumerator.put())));
-    // No device chosen = "automatic": play on the default device with this
-    // stream's volume at zero, relying on loopback capture seeing the stream
-    // before its volume is applied.
+    // Process loopback includes session volume. Muting the replay also mutes
+    // what Discord captures, so the default endpoint must carry audible audio.
     const bool automatic = config.deviceId.empty();
     winrt::com_ptr<IMMDevice> device;
     HRESULT hr = automatic ? enumerator->GetDefaultAudioEndpoint(eRender, eConsole, device.put())
                            : enumerator->GetDevice(config.deviceId.c_str(), device.put());
     if (FAILED(hr))
-        throw winrt::hresult_error(E_FAIL, L"The selected output device isn't available.");
+        throw winrt::hresult_error(hr, L"The selected output device isn't available.");
 
     winrt::com_ptr<IAudioClient> render;
     winrt::check_hresult(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, render.put_void()));
     WAVEFORMATEX format = FloatFormat();
     winrt::check_hresult(render->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                             AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
-                                                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+                                                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY | AUDCLNT_STREAMFLAGS_NOPERSIST,
                                             kBufferDuration, 0, &format, nullptr));
     winrt::handle renderEvent{ CreateEventW(nullptr, FALSE, FALSE, nullptr) };
     winrt::check_hresult(render->SetEventHandle(renderEvent.get()));
     winrt::com_ptr<IAudioRenderClient> renderClient;
     winrt::check_hresult(render->GetService(IID_PPV_ARGS(renderClient.put())));
-    if (automatic)
-    {
-        winrt::com_ptr<ISimpleAudioVolume> volume;
-        if (SUCCEEDED(render->GetService(IID_PPV_ARGS(volume.put()))))
-            volume->SetMasterVolume(0.f, nullptr);
-    }
+    // Also recover sessions left at zero (or muted) by previous versions or
+    // Windows' saved app volume. Do this for explicit devices as well.
+    winrt::com_ptr<ISimpleAudioVolume> volume;
+    winrt::check_hresult(render->GetService(IID_PPV_ARGS(volume.put())));
+    winrt::check_hresult(volume->SetMasterVolume(1.f, nullptr));
+    winrt::check_hresult(volume->SetMute(FALSE, nullptr));
     UINT32 bufferFrames = 0;
     winrt::check_hresult(render->GetBufferSize(&bufferFrames));
     winrt::check_hresult(render->Start());
 
     std::map<DWORD, std::unique_ptr<ProcessCapture>> captures;
-    std::set<DWORD> failed; // Processes whose capture couldn't start; not retried
+    struct Failure { std::wstring reason; ULONGLONG retryAt; };
+    std::map<DWORD, Failure> failed;
     ULONGLONG lastScan = 0;
     std::vector<float> mix;
 
@@ -458,16 +471,30 @@ void AudioPassthrough::RunPipeline(const Config& config, uint64_t generation)
         {
             lastScan = now;
             std::set<DWORD> wanted = config.targetProcess ? std::set<DWORD>{ config.targetProcess } : AudioProcesses();
-            std::erase_if(captures, [&](auto& kv) { return !wanted.count(kv.first); });
+            std::erase_if(failed, [&](auto& kv) { return !wanted.count(kv.first); });
+            std::erase_if(captures, [&](auto& kv) {
+                if (!wanted.count(kv.first))
+                    return true;
+                if (FAILED(kv.second->lastError))
+                {
+                    failed[kv.first] = { kv.second->Health(), now + 5000 };
+                    return true;
+                }
+                return false;
+            });
             for (DWORD pid : wanted)
             {
-                if (captures.count(pid) || failed.count(pid))
+                auto failure = failed.find(pid);
+                if (captures.count(pid) || (failure != failed.end() && now < failure->second.retryAt))
                     continue;
                 auto capture = std::make_unique<ProcessCapture>();
                 if (capture->Start(pid))
+                {
                     captures.emplace(pid, std::move(capture));
+                    failed.erase(pid);
+                }
                 else
-                    failed.insert(pid);
+                    failed[pid] = { capture->Health(), GetTickCount64() + 5000 };
             }
 
             std::vector<std::wstring> sources;
@@ -479,11 +506,10 @@ void AudioPassthrough::RunPipeline(const Config& config, uint64_t generation)
                     name += L" (" + health + L")";
                 sources.push_back(std::move(name));
             }
-            for (DWORD pid : failed)
-                if (wanted.count(pid))
-                    sources.push_back(ExeName(pid) + L" (Windows refused to capture it)");
+            for (const auto& [pid, failure] : failed)
+                sources.push_back(ExeName(pid) + L" (" + failure.reason + L"; retrying)");
             std::lock_guard lock(m_mutex);
-            m_status.running = true;
+            m_status.running = !captures.empty();
             m_status.error.clear();
             m_status.sources = std::move(sources);
         }
@@ -491,14 +517,17 @@ void AudioPassthrough::RunPipeline(const Config& config, uint64_t generation)
         HANDLE waits[] = { renderEvent.get(), m_wake };
         DWORD wait = WaitForMultipleObjects(2, waits, FALSE, 100);
         if (wait == WAIT_OBJECT_0 + 1)
-            SetEvent(m_wake); // Let the outer loop see the change too.
+            continue; // Recheck config/stop; re-signalling here causes a busy loop.
+        if (wait == WAIT_FAILED)
+            winrt::throw_last_error();
 
         for (auto& kv : captures)
             kv.second->Drain();
 
         UINT32 padding = 0;
-        if (FAILED(render->GetCurrentPadding(&padding)))
-            throw winrt::hresult_error(E_FAIL, L"The output device stopped working.");
+        hr = render->GetCurrentPadding(&padding);
+        if (FAILED(hr))
+            throw winrt::hresult_error(hr, L"The output device stopped working.");
         UINT32 frames = bufferFrames - padding;
         if (frames == 0)
             continue;
@@ -518,8 +547,7 @@ void AudioPassthrough::RunPipeline(const Config& config, uint64_t generation)
         }
 
         BYTE* out = nullptr;
-        if (FAILED(renderClient->GetBuffer(frames, &out)))
-            continue;
+        winrt::check_hresult(renderClient->GetBuffer(frames, &out));
         auto* dst = reinterpret_cast<float*>(out);
         float peak = 0.f;
         for (size_t i = 0; i < mix.size(); ++i)
@@ -528,7 +556,7 @@ void AudioPassthrough::RunPipeline(const Config& config, uint64_t generation)
             dst[i] = v;
             peak = std::max(peak, std::abs(v));
         }
-        renderClient->ReleaseBuffer(frames, 0);
+        winrt::check_hresult(renderClient->ReleaseBuffer(frames, 0));
 
         {
             std::lock_guard lock(m_mutex);

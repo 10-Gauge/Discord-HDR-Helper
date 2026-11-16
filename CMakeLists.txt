@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DiscordHDRHelper VERSION 1.2.0 LANGUAGES CXX RC)
+project(DiscordHDRHelper VERSION 1.2.1 LANGUAGES CXX RC)
 
 if(NOT MSVC)
     message(FATAL_ERROR "Discord HDR Helper uses C++/WinRT and needs the MSVC toolchain (Visual Studio 2022 or newer).")
@@ -48,3 +48,15 @@ target_compile_options(DiscordHDRHelper PRIVATE /W4 /permissive- /utf-8 /EHsc /b
 target_precompile_headers(DiscordHDRHelper PRIVATE src/pch.h)
 target_link_libraries(DiscordHDRHelper PRIVATE
     imgui d3d11 dxgi d3dcompiler d2d1 dcomp dwrite dwmapi windowscodecs mmdevapi windowsapp shell32 user32 ole32)
+
+# Opt-in: requires Windows 11 and an active audio output; plays a quiet test tone.
+option(HDR_HELPER_AUDIO_TESTS "Build the WASAPI hardware smoke test" OFF)
+if(HDR_HELPER_AUDIO_TESTS)
+    enable_testing()
+    add_executable(AudioPassthroughSmoke tests/AudioPassthroughSmoke.cpp)
+    target_compile_definitions(AudioPassthroughSmoke PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+    target_compile_options(AudioPassthroughSmoke PRIVATE /W4 /permissive- /utf-8 /EHsc)
+    target_link_libraries(AudioPassthroughSmoke PRIVATE mmdevapi windowsapp ole32 user32)
+    add_test(NAME AudioPassthroughSmoke COMMAND AudioPassthroughSmoke)
+    set_tests_properties(AudioPassthroughSmoke PROPERTIES TIMEOUT 45)
+endif()

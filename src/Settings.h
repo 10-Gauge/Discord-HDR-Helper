@@ -20,7 +20,7 @@ struct Settings
 
     bool audioEnabled = true;   // Replay app audio so Discord's window share carries it
     int audioMode = 0;          // 0 = the captured window's app (all apps for a display), 1 = all apps
-    std::wstring audioDevice;   // Output device to replay into; empty = automatic (silent on the default device)
+    std::wstring audioDevice;   // Output device to replay into; empty = default output device
 
     void Load();
     void Save() const;

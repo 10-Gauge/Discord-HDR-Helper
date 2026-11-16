@@ -32,7 +32,7 @@ your screen the way it's meant to look.
 - **Displays or single windows.** Capture a whole monitor or just one game or app.
 - **Brings your game audio along.** Discord only sends sound from the app that
   owns a shared window, so the helper replays your game's audio (or every app's,
-  minus Discord) from its own window, silently, without a virtual cable.
+  minus Discord) from its own process for Discord to capture.
 - **Stays out of the way.** The output window can sit behind everything else
   (Discord still captures it), and the control panel hides itself from screen
   capture so it never appears in your stream.
@@ -42,6 +42,8 @@ your screen the way it's meant to look.
 
 - Windows 10 version 2004 or newer (Windows 11 recommended, which also removes
   the yellow capture border)
+- Audio passthrough requires Windows 11 or Windows build 20348 or newer;
+  ordinary Windows 10 desktop releases support video only.
 - A GPU with Direct3D 11 support
 - Discord desktop app
 
@@ -64,9 +66,27 @@ records the audio of the app you capture (or all apps except Discord when you
 capture a display) and replays it, so Discord picks it up from the output window.
 Make sure **Sound** is on in Discord's stream settings.
 
-By default the replay runs on your normal speakers at zero volume, so you don't
-hear anything twice. If your viewers get no sound, open the **Audio** tab and
-pick an output device you don't listen to, such as your monitor's speakers.
+The replay must remain **unmuted**: Windows process loopback applies the helper's
+session volume before Discord receives it. Earlier versions set this volume to
+zero in Automatic mode, which could also leave explicitly selected devices silent.
+
+By default the replay uses your normal output device, so you may hear the audio
+twice. In the **Audio** tab, choose an output you don't listen to, such as unused
+monitor speakers or the playback endpoint of a virtual audio cable. Keep the
+helper unmuted in Windows Volume Mixer. If needed, silence spare speakers using
+their physical controls rather than muting the helper's audio session.
+
+If there is still no sound:
+
+- Share **Discord HDR Helper Output** from Discord's **Applications** tab and
+  enable **Sound**.
+- Play sound in the source app and check the helper's Audio meter. It measures
+  captured audio; it does not confirm that Discord or viewers receive it.
+- If the meter stays at zero, try **All apps** (some apps play sound from a
+  separate process). The source list reports silence, missing data, or the
+  failing Windows operation and error code. Failed captures retry automatically.
+- If the meter moves but viewers hear nothing, check the playback device and
+  the helper's Windows mixer volume, then restart the Discord screen share.
 
 ### Tips
 
@@ -116,6 +136,9 @@ cmake --build build --config Release
 
 The executable is written to `build\Release\DiscordHDRHelper.exe`. Dear ImGui is
 downloaded by CMake during configuration.
+
+For the optional Windows audio test and Discord verification steps, see
+[Audio passthrough fix and testing](docs/audio-fix.md).
 
 ## License
 

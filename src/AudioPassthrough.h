@@ -34,7 +34,7 @@ public:
     static std::vector<Device> EnumerateOutputDevices();
 
     // targetProcess = 0 captures every app except Discord and this one.
-    // An empty deviceId plays silently on the default device.
+    // An empty deviceId replays on the default device at normal session volume.
     void Configure(bool enabled, const std::wstring& deviceId, DWORD targetProcess);
     Status GetStatus() const;
 

@@ -1076,8 +1076,8 @@ void Panel::DrawAudio(float width)
     for (const auto& d : m_audioDevices)
         if (d.id == s.audioDevice)
             selected = &d;
-    constexpr char kAutomatic[] = "Automatic (silent, no extra device)";
-    std::string preview = selected ? Utf8(selected->name) : kAutomatic;
+    constexpr char kAutomatic[] = "Default output device (audible replay)";
+    std::string preview = selected ? Utf8(selected->name) : s.audioDevice.empty() ? kAutomatic : "Selected device unavailable";
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::PushStyleColor(ImGuiCol_FrameBg, Vec(0x1E1F22));
     ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Vec(kHover));
@@ -1103,7 +1103,7 @@ void Panel::DrawAudio(float width)
     ImGui::PopStyleColor(2);
 
     ImGui::PushFont(m_fontSmall);
-    if (selected && selected->isDefault)
+    if (s.audioDevice.empty() || (selected && selected->isDefault))
     {
         ImGui::PushStyleColor(ImGuiCol_Text, Vec(0xF0B232));
         ImGui::TextWrapped(ICON_WARNING "  This is the device you listen on, so you'll hear the audio twice. "
@@ -1112,8 +1112,7 @@ void Panel::DrawAudio(float width)
     }
     else if (!selected)
     {
-        MutedText("Replays the audio on your speakers at zero volume, so you don't hear it twice. "
-                  "If viewers get no sound, pick a device you don't listen to instead.");
+        MutedText("The selected output device is unavailable. Reconnect it or select another device.");
     }
     else
     {
@@ -1150,7 +1149,7 @@ void Panel::DrawAudio(float width)
         line = "Waiting for an app to play sound\xE2\x80\xA6";
     else
     {
-        line = "Sending: ";
+        line = "Sources: ";
         for (size_t i = 0; i < status.sources.size(); ++i)
             line += (i ? ", " : "") + Utf8(status.sources[i]);
         color = Rgb(kText);
@@ -1168,7 +1167,9 @@ void Panel::DrawAudio(float width)
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color));
     ImGui::TextWrapped("%s", line.c_str());
     ImGui::PopStyleColor();
-    MutedText("In Discord, make sure Sound is on in the stream settings.");
+    MutedText("In Discord, make sure Sound is on in the stream settings. "
+              "Keep the helper unmuted in Windows Volume Mixer. "
+              "The meter shows captured audio, not confirmation that viewers hear it.");
     ImGui::PopFont();
 
     EndCard();
